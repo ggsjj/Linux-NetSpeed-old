@@ -2,16 +2,8 @@
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 
-#=================================================
-#	System Required: CentOS 6+,Debian7+,Ubuntu12+
-#	Description: BBR+BBR魔改版+Lotserver
-#	Version: 1.1.9
-#	Author: 千影
-#	Blog: https://www.94ish.me/
-#=================================================
-
 sh_ver="1.1.9"
-github="raw.githubusercontent.com/chiakge/Linux-NetSpeed/master"
+github="raw.githubusercontent.com/ggsjj/Linux-NetSpeed/master"
 
 Green_font_prefix="\033[32m" && Red_font_prefix="\033[31m" && Green_background_prefix="\033[42;37m" && Red_background_prefix="\033[41;37m" && Font_color_suffix="\033[0m"
 Info="${Green_font_prefix}[信息]${Font_color_suffix}"
@@ -280,34 +272,291 @@ net.ipv4.ip_forward = 1">>/etc/sysctl.conf
 		reboot
 	fi
 }
-#更新脚本
+
 Update_Shell(){
-	echo -e "当前版本为 [ ${sh_ver} ]，开始检测最新版本..."
-	sh_new_ver=$(wget --no-check-certificate -qO- "http://${github}/tcp.sh"|grep 'sh_ver="'|awk -F "=" '{print $NF}'|sed 's/\"//g'|head -1)
-	[[ -z ${sh_new_ver} ]] && echo -e "${Error} 检测最新版本失败 !" && start_menu
-	if [[ ${sh_new_ver} != ${sh_ver} ]]; then
-		echo -e "发现新版本[ ${sh_new_ver} ]，是否更新？[Y/n]"
-		read -p "(默认: y):" yn
-		[[ -z "${yn}" ]] && yn="y"
-		if [[ ${yn} == [Yy] ]]; then
-			wget -N --no-check-certificate http://${github}/tcp.sh && chmod +x tcp.sh
-			echo -e "脚本已更新为最新版本[ ${sh_new_ver} ] !"
-		else
-			echo && echo "	已取消..." && echo
-		fi
-	else
-		echo -e "当前已是最新版本[ ${sh_new_ver} ] !"
-		sleep 5s
+# 更换网卡eth0
+ip addr
+
+sed  -i 's/consoleblank=0/net.ifnames=0 biosdevname=0/g'  /etc/default/grub
+sed  -i 's/ens3/eth0/g'  /etc/network/interfaces
+grub-mkconfig -o /boot/grub/grub.cfg
+
+	read -p "需要重启VPS后，才能生效，是否现在重启 ? [Y/n] :" yn
+	[ -z "${yn}" ] && yn="y"
+	if [[ $yn == [Yy] ]]; then
+		echo -e "${Info} VPS 重启中..."
+		reboot
 	fi
 }
+###########################
+
+
+
+
+
+
+
+
+
+
+
+#debian8安装wireguard
+wireguard_debian8_install(){
+if  [ -n "$(grep 'Ubuntu' /etc/issue.net)" ] ;then
+echo "请选择 Ubuntu安装wireguard,请稍等..."
+sleep 3s
+exit
+fi
+if  [ -n "$(grep '[Interface]' /etc/wireguard/wg0.conf)" ] ;then
+echo "你已安装wireguard,请稍等..."
+sleep 3s
+exit
+fi
+echo "deb http://deb.debian.org/debian/ unstable main" > /etc/apt/sources.list.d/unstable.list
+echo -e 'Package: *\nPin: release a=unstable\nPin-Priority: 150' > /etc/apt/preferences.d/limit-unstable
+apt update
+apt install linux-headers-$(uname -r) -y
+apt install wireguard resolvconf -y
+add-apt-repository ppa:wireguard/wireguard
+rand(){
+    min=$1
+    max=$(($2-$min+1))
+    num=$(cat /dev/urandom | head -n 10 | cksum | awk -F ' ' '{print $1}')
+    echo $(($num%$max+$min))  
+}
+port=$(rand 1000 60000)
+apt-get update -y && apt-get install curl -y
+serverip=$(curl icanhazip.com)
+mkdir /root/wireguard
+mkdir /etc/wireguard
+cd /etc/wireguard
+wg genkey | tee sprivatekey | wg pubkey > spublickey
+wg genkey | tee cprivatekey | wg pubkey > cpublickey
+port=$(rand 10000 60000)
+echo "[Interface]
+# 服务器的私匙，对应客户端配置中的公匙（自动读取上面刚刚生成的密匙内容）
+PrivateKey = $(cat sprivatekey)
+# 本机的内网IP地址，一般默认即可，除非和你服务器或客户端设备本地网段冲突
+Address = 10.0.0.1/24 
+# 运行 WireGuard 时要执行的 iptables 防火墙规则，用于打开NAT转发之类的。
+# 如果你的服务器主网卡名称不是 eth0 ，那么请修改下面防火墙规则中最后的 eth0 为你的主网卡名称。
+PostUp   = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+# 停止 WireGuard 时要执行的 iptables 防火墙规则，用于关闭NAT转发之类的。
+# 如果你的服务器主网卡名称不是 eth0 ，那么请修改下面防火墙规则中最后的 eth0 为你的主网卡名称。
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+# 服务端监听端口，可以自行修改
+ListenPort = $port
+# 服务端请求域名解析 DNS
+DNS = 8.8.8.8
+# 保持默认
+MTU = 1420
+# [Peer] 代表客户端配置，每增加一段 [Peer] 就是增加一个客户端账号，具体我稍后会写多用户教程。
+[Peer]
+# 该客户端账号的公匙，对应客户端配置中的私匙（自动读取上面刚刚生成的密匙内容）
+PublicKey = $(cat cpublickey)
+# 该客户端账号的内网IP地址
+AllowedIPs = 10.0.0.2/32"|sed '/^#/d;/^\s*$/d' > wg0.conf
+wg
+echo "[Interface]
+# 客户端的私匙，对应服务器配置中的客户端公匙（自动读取上面刚刚生成的密匙内容）
+PrivateKey = $(cat cprivatekey)
+# 客户端的内网IP地址
+Address = 10.0.0.2/24
+# 解析域名用的DNS
+DNS = 8.8.8.8
+# 保持默认
+MTU = 1420
+[Peer]
+# 服务器的公匙，对应服务器的私匙（自动读取上面刚刚生成的密匙内容）
+PublicKey = $(cat spublickey)
+# 服务器地址和端口，下面的 X.X.X.X 记得更换为你的服务器公网IP，端口请填写服务端配置时的监听端口
+Endpoint = $serverip:$port
+# 因为是客户端，所以这个设置为全部IP段即可
+AllowedIPs = 0.0.0.0/0, ::0/0
+# 保持连接，如果客户端或服务端是 NAT 网络(比如国内大多数家庭宽带没有公网IP，都是NAT)，那么就需要添加这个参数定时链接服务端(单位：秒)，如果你的服务器和你本地都不是 NAT 网络，那么建议不使用该参数（设置为0，或客户端配置文件中删除这行）
+PersistentKeepalive = 25"|sed '/^#/d;/^\s*$/d' > client.conf
+ chmod 777 -R /etc/wireguard
+ 
+# 打开防火墙转发功能
+echo 1 > /proc/sys/net/ipv4/ip_forward
+echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
+sysctl -p
+wg-quick up wg0
+systemctl enable wg-quick@wg0
+echo "client配置如下："
+cat /etc/wireguard/client.conf
+\cp -f /etc/wireguard/client.conf /root/wireguard/client.conf
+}
+
+
+
+wireguard_ubuntu_install(){
+if  [ -n "$(grep 'Debian' /etc/issue.net)" ] ;then
+echo "请选择 Debian安装wireguard,请稍等..."
+sleep 3s
+exit
+fi
+if  [ -n "$(grep '[Interface]' /etc/wireguard/wg0.conf)" ] ;then
+echo "你已安装wireguard,请稍等..."
+sleep 3s
+exit
+fi
+apt update
+apt install linux-headers-$(uname -r) -y
+apt install software-properties-common -y
+echo .read | add-apt-repository ppa:wireguard/wireguard
+apt update
+apt install wireguard resolvconf -y
+
+rand(){
+    min=$1
+    max=$(($2-$min+1))
+    num=$(cat /dev/urandom | head -n 10 | cksum | awk -F ' ' '{print $1}')
+    echo $(($num%$max+$min))  
+}
+port=$(rand 1000 60000)
+apt-get update -y && apt-get install curl -y
+serverip=$(curl icanhazip.com)
+mkdir /root/wireguard
+mkdir /etc/wireguard
+cd /etc/wireguard
+wg genkey | tee sprivatekey | wg pubkey > spublickey
+wg genkey | tee cprivatekey | wg pubkey > cpublickey
+echo "[Interface]
+# 服务器的私匙，对应客户端配置中的公匙（自动读取上面刚刚生成的密匙内容）
+PrivateKey = $(cat sprivatekey)
+# 本机的内网IP地址，一般默认即可，除非和你服务器或客户端设备本地网段冲突
+Address = 10.0.0.1/24 
+# 运行 WireGuard 时要执行的 iptables 防火墙规则，用于打开NAT转发之类的。
+# 如果你的服务器主网卡名称不是 eth0 ，那么请修改下面防火墙规则中最后的 eth0 为你的主网卡名称。
+PostUp   = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+# 停止 WireGuard 时要执行的 iptables 防火墙规则，用于关闭NAT转发之类的。
+# 如果你的服务器主网卡名称不是 eth0 ，那么请修改下面防火墙规则中最后的 eth0 为你的主网卡名称。
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+# 服务端监听端口，可以自行修改
+ListenPort = $port
+# 服务端请求域名解析 DNS
+DNS = 8.8.8.8
+# 保持默认
+MTU = 1420
+# [Peer] 代表客户端配置，每增加一段 [Peer] 就是增加一个客户端账号，具体我稍后会写多用户教程。
+[Peer]
+# 该客户端账号的公匙，对应客户端配置中的私匙（自动读取上面刚刚生成的密匙内容）
+PublicKey = $(cat cpublickey)
+# 该客户端账号的内网IP地址
+AllowedIPs = 10.0.0.2/32"|sed '/^#/d;/^\s*$/d' > wg0.conf
+wg
+echo "[Interface]
+# 客户端的私匙，对应服务器配置中的客户端公匙（自动读取上面刚刚生成的密匙内容）
+PrivateKey = $(cat cprivatekey)
+# 客户端的内网IP地址
+Address = 10.0.0.2/24
+# 解析域名用的DNS
+DNS = 8.8.8.8
+# 保持默认
+MTU = 1420
+[Peer]
+# 服务器的公匙，对应服务器的私匙（自动读取上面刚刚生成的密匙内容）
+PublicKey = $(cat spublickey)
+# 服务器地址和端口，下面的 X.X.X.X 记得更换为你的服务器公网IP，端口请填写服务端配置时的监听端口
+Endpoint = $serverip:$port
+# 因为是客户端，所以这个设置为全部IP段即可
+AllowedIPs = 0.0.0.0/0, ::0/0
+# 保持连接，如果客户端或服务端是 NAT 网络(比如国内大多数家庭宽带没有公网IP，都是NAT)，那么就需要添加这个参数定时链接服务端(单位：秒)，如果你的服务器和你本地都不是 NAT 网络，那么建议不使用该参数（设置为0，或客户端配置文件中删除这行）
+PersistentKeepalive = 25"|sed '/^#/d;/^\s*$/d' > client.conf
+ chmod 777 -R /etc/wireguard
+ 
+# 打开防火墙转发功能
+echo 1 > /proc/sys/net/ipv4/ip_forward
+echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
+sysctl -p
+wg-quick up wg0
+systemctl enable wg-quick@wg0
+echo "client配置如下："
+cat /etc/wireguard/client.conf
+\cp -f /etc/wireguard/client.conf /root/wireguard/client.conf
+}
+
+wireguard_newsyuhu(){
+
+echo "请确认你已安装wireguard服务"
+echo "直接回车或输入错误会导指新添加用户不能使用"
+echo "输入ListenPort = 后面的数字，如（ListenPort = 390 输入390)"
+echo ""
+sed -n 6p /etc/wireguard/wg0.conf
+read -p "请输入数字:" r
+
+rand(){
+    min=$1
+    max=$(($2-$min+1))
+    num=$(cat /dev/urandom | head -n 10 | cksum | awk -F ' ' '{print $1}')
+    echo $(($num%$max+$min))  
+}
+hu=$(rand 10 250)
+serverip=$(curl icanhazip.com)
+cd /etc/wireguard
+wg genkey | tee cprivatekey$hu | wg pubkey > cpublickey$hu
+wg set wg0 peer $(cat cpublickey$hu) allowed-ips 10.0.0.$hu/32
+wg-quick save wg0
+
+echo "[Interface]
+# 客户端的私匙，对应服务器配置中的客户端公匙（自动读取上面刚刚生成的密匙内容）
+PrivateKey = $(cat cprivatekey$hu)
+# 客户端的内网IP地址（如果上面你添加的内网IP不是 .3 请自行修改）
+Address = 10.0.0.$hu/24
+# 解析域名用的DNS
+DNS = 8.8.8.8
+# 保持默认
+MTU = 1420
+[Peer]
+# 服务器的公匙，对应服务器的私匙（自动读取上面刚刚生成的密匙内容）
+PublicKey = $(cat spublickey)
+# 服务器地址和端口，下面的 X.X.X.X 记得更换为你的服务器公网IP，端口请填写服务端配置时的监听端口
+Endpoint = $serverip:$r
+# 因为是客户端，所以这个设置为全部IP段即可
+AllowedIPs = 0.0.0.0/0, ::0/0
+# 保持连接，如果客户端或服务端是 NAT 网络(比如国内大多数家庭宽带没有公网IP，都是NAT)，那么就需要添加这个参数定时链接服务端(单位：秒)，如果你的服务器和你本地都不是 NAT 网络，那么建议不使用该参数（设置为0，或客户端配置文件中删除这行）
+PersistentKeepalive = 25"|sed '/^#/d;/^\s*$/d' > client$hu.conf
+wg-quick down wg0
+wg-quick up wg0
+echo "client$hu配置如下："
+cat /etc/wireguard/client$hu.conf
+cp -f /etc/wireguard/client$hu.conf /root/wireguard/client$hu.conf
+}
+
+wireguard_ls(){
+echo "-----文件在根目录wireguard内--------"
+ls -1 /root/wireguard
+echo "-----------------------------------"
+echo "直接回车默认用户"
+echo "输入数字client后面数字 如(client12输入12)"
+read -p "请输入数字:" la
+echo "client$la配置如下："
+ cat /root/wireguard/client$la.conf
+}
+
+
+
+
+
+
+
+
+#############################
+
+
+
+
+
 
 #开始菜单
 start_menu(){
 clear
-echo && echo -e " TCP加速 一键安装管理脚本 ${Red_font_prefix}[v${sh_ver}]${Font_color_suffix}
-  -- 就是爱生活 | 94ish.me --
+echo && echo -e " TCP加速与WireGuard安装功能
+  -- <就是爱生活一键安装管理脚本> 基础之上添加WireGuard安装功能 --
+  -- 先更换内核再安装WireGuard --
   
- ${Green_font_prefix}0.${Font_color_suffix} 升级脚本
+ ${Green_font_prefix}0.${Font_color_suffix} ubuntu需先更换网卡
 ————————————内核管理————————————
  ${Green_font_prefix}1.${Font_color_suffix} 安装 BBR/BBR魔改版内核
  ${Green_font_prefix}2.${Font_color_suffix} 安装 Lotserver(锐速)内核
@@ -319,7 +568,12 @@ echo && echo -e " TCP加速 一键安装管理脚本 ${Red_font_prefix}[v${sh_ve
 ————————————杂项管理————————————
  ${Green_font_prefix}7.${Font_color_suffix} 卸载全部加速
  ${Green_font_prefix}8.${Font_color_suffix} 系统配置优化
- ${Green_font_prefix}9.${Font_color_suffix} 退出脚本
+————————————WireGuard安装————————————
+ ${Green_font_prefix}9.${Font_color_suffix}  debian安装
+ ${Green_font_prefix}10.${Font_color_suffix} ubuntu安装
+ ${Green_font_prefix}11.${Font_color_suffix} 添加新用户
+ ${Green_font_prefix}12.${Font_color_suffix} 查看用户配置
+ ${Green_font_prefix}13.${Font_color_suffix} 退出脚本
 ————————————————————————————————" && echo
 
 	check_status
@@ -330,7 +584,7 @@ echo && echo -e " TCP加速 一键安装管理脚本 ${Red_font_prefix}[v${sh_ve
 		
 	fi
 echo
-read -p " 请输入数字 [0-9]:" num
+read -p " 请输入数字 [0-13]:" num
 case "$num" in
 	0)
 	Update_Shell
@@ -360,11 +614,23 @@ case "$num" in
 	optimizing_system
 	;;
 	9)
+	wireguard_debian8_install
+	;;
+	10)
+	wireguard_ubuntu_install
+	;;
+	11)
+	wireguard_newsyuhu
+	;;
+	12)
+	wireguard_ls
+	;;
+	13)
 	exit 1
 	;;
 	*)
 	clear
-	echo -e "${Error}:请输入正确数字 [0-8]"
+	echo -e "${Error}:请输入正确数字 [0-13]"
 	sleep 5s
 	start_menu
 	;;
